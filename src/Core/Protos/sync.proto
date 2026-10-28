@@ -1,0 +1,103 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+
+option csharp_namespace = "ZeroDrive.Core.Protos";
+
+package sync;
+
+service SyncService {
+	// Block data
+	// Block data is raw data, since they are keyed by their hash, it prevents duplication of data.
+	rpc GetBlockData (BlockDataRequest) returns (stream BlockChunk);
+	rpc DoBlocksExist (BlockDataRequest) returns (BlockExistsResponse);
+	rpc UploadBlockData (stream BlockChunk) returns (UploadResponse);
+	
+	// Get and set file information.
+	// File information is a collection of metadata about a file, including its size, hash, and the related chunk information for that file.
+	rpc GetFileInfo (FileInfoRequest) returns (FileInfoData);
+	rpc StageFileInfo (StageFileInfoRequest) returns (StageFileInfoResponse);
+	rpc CommitFileInfo (CommitFileInfoRequest) returns (UploadResponse);
+	rpc DeleteFileInfo (FileInfoRequest) returns (UploadResponse);
+
+	// Workspace manifests.
+	// A workspace can be described as a tracked directory by ZeroDrive.
+	// Workspace manifests are a collection of file information for a given workspace,
+	// like a directory listing, giving you information about the files in that workspace.
+	rpc GetWorkspaces (google.protobuf.Empty) returns (stream WorkspaceData);
+	rpc GetWorkspaceManifest (WorkspaceInfoRequest) returns (stream FileInfoData);
+	rpc CreateWorkspace (WorkspaceData) returns (UploadResponse);
+	rpc DeleteWorkspace (WorkspaceInfoRequest) returns (UploadResponse);
+}
+
+// TODO: This message might be useful for the client to know what configuration 
+// the server is using for hashing and chunking, so that the client can match it.
+message ExpectedFormatQueryResponse {
+	string hash_algo = 1;
+}
+
+message FileInfoRequest {
+	string workspace_id = 1;
+	string file_path = 2;
+}
+
+message FileChunkMeta {
+	bytes hash = 1;
+	int64 size = 2;
+	repeated int64 offsets = 3;
+}
+
+message StageFileInfoRequest {
+	string workspace_id = 1;
+	string file_path = 2;
+	int64 size = 3;
+	int64 modified = 4;
+	repeated FileChunkMeta chunk_meta = 5;
+}
+
+message StageFileInfoResponse {
+	repeated bytes missing_hashes = 1;
+	optional string stage_id = 2;
+}
+
+message CommitFileInfoRequest {
+	string workspace_id = 1;
+	string file_path = 2;
+	optional string old_file_path = 3;
+	optional string stage_id = 4;
+}
+
+message FileInfoData {
+	string file_path = 1;
+	int64 size = 2;
+	bytes hash = 3;
+	int64 modified = 4;
+	repeated FileChunkMeta chunk_meta = 5;
+	optional string workspace_id = 6;
+}
+
+message BlockDataRequest {
+	repeated bytes block_hashes = 1;
+}
+
+message BlockChunk {
+	bytes block_hash = 1;
+	bytes data = 2;
+}
+
+message UploadResponse {
+	optional string error = 1;
+}
+
+message BlockExistsResponse {
+	repeated bytes missing_hashes = 1;
+}
+
+message WorkspaceData {
+	string workspace_id = 1;
+	string workspace_name = 2;
+}
+
+message WorkspaceInfoRequest {
+	string workspace_id = 1;
+}

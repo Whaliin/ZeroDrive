@@ -1,41 +1,72 @@
-var builder = WebApplication.CreateBuilder(args);
+using ZeroDrive.Server.Services;
+using ZeroDrive.Server.Storage;
 
-// Add services to the container.
-// Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
-builder.Services.AddOpenApi();
+namespace ZeroDrive.Server;
 
-var app = builder.Build();
+using RepoDb;
 
-// Configure the HTTP request pipeline.
-if (app.Environment.IsDevelopment())
+public class Program
 {
-    app.MapOpenApi();
-}
+	public static void Main(string[] args)
+	{
+		var builder = WebApplication.CreateBuilder(args);
 
-app.UseHttpsRedirection();
+		// Add the configuration files
+		builder.Configuration.AddJsonFile("appsettings.json", optional: false, reloadOnChange: true)
+			.AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.json", optional: true, reloadOnChange: true)
+			.AddJsonFile("config.json", optional: true, reloadOnChange: true);
+			//.AddEnvironmentVariables();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
 
-app.MapGet("/weatherforecast", () =>
-{
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast");
+		// Add services to the container.
+		// Configuration provider for ServerConfig
+		builder.Services.Configure<ServerConfig>(builder.Configuration.GetSection("ServerConfig"));
+		
+		// gRPC services
+		builder.Services.AddGrpc(options =>
+		{
+			options.MaxReceiveMessageSize = builder.Configuration.GetValue<int>("ServerConfig:GRPCMaxMessageSize");
+			options.MaxSendMessageSize = builder.Configuration.GetValue<int>("ServerConfig:GRPCMaxMessageSize");
 
-app.Run();
+			if (builder.Environment.IsDevelopment())
+			{
+				options.EnableDetailedErrors = true;
+			}
+		});
 
-record WeatherForecast(DateOnly Date, int TemperatureC, string? Summary)
-{
-    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556);
+		// Add the storage provider based on the config
+		var serverConfig = builder.Configuration.GetSection("ServerConfig").Get<ServerConfig>() ?? new ServerConfig();
+		var storageProvider = CreateStorageProvider(serverConfig);
+
+		/*
+		builder.Services.AddSingleton<IStorageProvider, FileStorageProvider>(sp =>
+		{
+			var storageDirectory = builder.Configuration.GetValue<string>("StorageDirectory") ?? "blobs";
+			return new FileStorageProvider(storageDirectory);
+		});
+		*/
+
+		// Build the app
+		var app = builder.Build();
+
+		// Configure the HTTP request pipeline.
+		if (!app.Environment.IsDevelopment())
+		{
+			app.UseHttpsRedirection();
+		}
+
+		app.MapGrpcService<SyncServiceImpl>();
+
+		app.MapGet("/", () => "Communication with gRPC endpoints must be made through a gRPC client. To learn how to create a client, visit: https://go.microsoft.com/fwlink/?linkid=2086909");
+
+		app.Run();
+	}
+
+	private static IStorageProvider CreateStorageProvider(ServerConfig config) => 
+		config.StorageProviderType switch
+		{
+			StorageProviderType.FileSystem => new FileStorageProvider(config.FileStorage ?? new FileStorageConfig()),
+			StorageProviderType.SQLite => new SQLiteStorageProvider(config.SQLiteStorage ?? new SqliteStorageConfig()),
+			_ => throw new InvalidOperationException($"Unsupported storage provider type: {config.StorageProviderType}")
+		};
 }
